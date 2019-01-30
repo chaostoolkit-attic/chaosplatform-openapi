@@ -1,0 +1,1695 @@
+openapi: "3.0.2"
+info:
+  title: Chaos Platform Open API
+  version: 0.1.0
+  contact:
+    name: Chaos Toolkit
+    url: 'https://chaostoolkit.org'
+    email: contact@chaostoolkit.org
+  license:
+    name: Apache 2.0
+    url: 'http://www.apache.org/licenses/LICENSE-2.0.html'
+  description: |
+    This OpenAPI is the public HTTP API of the Chaos Platform.
+    Currently it is meant to handle the basic resources exposed by the Chaos
+    Platform:
+
+    * Users
+    * Organizations, Workspaces
+    * Access Token
+    * Experiment, Execution
+    * Scheduling
+    * Policies
+
+    If you are interested, please contribute to the discussion on the
+    issue at https://github.com/chaostoolkit/chaoshub/issues/3
+
+    Some points to keep in mind:
+
+    * It should be possible to create/delete all resources at the root leve 
+      of the API. For instance, while an experiment lives in a workspace. It
+      should be possible to create the experiment like this, 
+      `POST /api/v1/experiment`, rather than
+      `POST /api/v1/workspace/{workspace_id}/experiment`. The rationale is that
+      resources exist notwhithstanding where they are logically grouped. In
+      effect, we decouple how resources related with each other from their
+      existence.
+    * Resources are identified using a UUID. While UUID have their short
+      comings, they are portable and well-supported by all languages. They must
+      be considered as opaque strings however and their high-cardinality should
+      be understood. Note also that OpenAPI does not officially specify a uuid
+      type, so we must fallback to declare them as strings in this
+      specification.
+    * Registration of a new user is performed out of band from this API. In,
+      other words, to use this API you must have created an account via the
+      web interface and, at least, one access token. Then, with that token, you
+      can start calling this API.
+    * This API does not expose a `/reporting` endpoint because extracting data
+      is often a consumer concern (filters...) that can't easily be expressed
+      via a REST API. Instead, this will be exposed as a GraphQL endpoint.
+    * The policy resource is very much under specified here and requires a lot
+      more thoughts, but it provides a starting point for discussing what
+      policing chaos experiment means for an organization.
+tags:
+  - name: Organization
+    description: |
+      An organization is a  grouping entity used to sort your experiments, and
+      their executions, into workspaces. In other word, organizations contain
+      workspaces which, in turn, holds experiments and executions.
+
+      You could use an organization per team and one workspace per project for
+      that team. Or the other way around. It's up to you to make a decision
+      how you wish to categorize and triage your experiments.
+
+      Notice, no two organizations can have the same name.
+  - name: Workspace
+    description: |
+      A workspace is a  grouping entity used to triage your experiments and
+      their executions.
+
+      Notice, no two workspaces can have the same name within a given
+      organization.
+  - name: Experiment
+    externalDocs:
+      url: https://docs.chaostoolkit.org/reference/api/experiment/
+  - name: Execution
+    description: |
+      An execution is a single run of an experiment. It contains metadata about
+      the run, such as its date and duration but also the journal, as per the
+      Chaos Toolkit specification.
+    externalDocs:
+      url: https://docs.chaostoolkit.org/reference/api/journal/
+  - name: Scheduling
+    description: |
+      A scheduling represents the incarnation of a set of planned executions.
+      A scheduling may be paused/resumed, cancelled.
+  - name: Policy
+    description: |
+      A policy describes conditions, scoping and context for a resource such
+      as the experiment or scheduling. For the former, it is used to express
+      the blast radius of the experiment, e.g. the functional perimeter of the
+      experiment. For the scheduling, the policy describes how a scheduling
+      can co-exist with other schedulings, for instance, preventing
+      other schedulings to take place at a given moment.
+servers:
+  - url: http://localhost:8080/api/v1
+paths:
+  /auth/tokens:
+    get:
+      tags:
+        - Authorization
+      operationId: servertck.list_tokens
+      summary: List all tokens for the authenticated user
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: List of access tokens the user owns
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessTokens'
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/auth/tokens"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+
+            response = requests.get(
+              "https://localhost:8080/api/v1/auth/tokens",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+
+            tokens = response.json()
+    post:
+      tags:
+        - Authorization
+      operationId: servertck.create_token
+      summary: Create a new access token for the given user
+      responses:
+        '401':
+          description: Unauthenticated
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessToken'
+        '409':
+          description: Name already used for another of the user's tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Payload error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        description: Token name and the user to add the new token to
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAccessToken'
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -X POST -H "Authorization: Bearer TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              -d '{
+                  "name": "my-new-token",
+                  "user_id": "USER_ID_UUID"
+              }' \
+              "https://localhost:8080/api/v1/auth/tokens"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+            user_id = "USER ID UUID"
+
+            response = requests.post(
+              "https://localhost:8080/api/v1/auth/tokens",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+                "Content-Type": "application/json"
+              },
+              json={
+                "name": "my-new-token",
+                "user_id": f"{user_id}"
+              }
+            )
+
+            token = response.json()
+  /auth/tokens/{token_id}:
+    get:
+      tags:
+        - Authorization
+      operationId: servertck.get_token
+      summary: Get the token
+      parameters:
+        - $ref:  '#/components/parameters/TokenId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The access token owned by the user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessToken'
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/auth/tokens/TOKEN_UUID"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+            token_uuid = ""
+
+            response = requests.get(
+              f"https://localhost:8080/api/v1/auth/tokens/{token_uuid}",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+
+            token = response.json()
+    delete:
+      tags:
+        - Authorization
+      operationId: servertck.delete_token
+      summary: Delete the token
+      parameters:
+        - $ref:  '#/components/parameters/TokenId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '204':
+          description:  The access token is deleted
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -XDELETE -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/auth/tokens/TOKEN_UUID"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+            token_uuid = ""
+
+            response = requests.delete(
+              f"https://localhost:8080/api/v1/auth/tokens/{token_uuid}",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+
+  /organizations:
+    get:
+      tags:
+        - Organization
+      operationId: servertck.list_orgs
+      summary: List all organizations the authenticated user has access to
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: A list of organizations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organizations'
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/organizations"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+
+            response = requests.get(
+              f"https://localhost:8080/api/v1/organizations",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+
+            orgs = response.json()
+    post:
+      tags:
+        - Organization
+      operationId: servertck.create_org
+      summary: Create an organization
+      responses:
+        '401':
+          description: Unauthenticated
+        '409':
+          description: Name already used globally
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '201':
+          description: The newly created organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+      requestBody:
+        description: Organization definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewOrganization'
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/organizations/ORG_UUID"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+            org_uuid = ""
+
+            response = requests.get(
+              f"https://localhost:8080/api/v1/organizations/{org_uuid}",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+
+            org = response.json()
+  /organizations/{org_id}:
+    get:
+      tags:
+        - Organization
+      operationId: servertck.get_org
+      summary: Get an organization's details
+      parameters:
+        - $ref:  '#/components/parameters/OrganizationId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Organization not found
+        '200':
+          description: The organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Organization'
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/organizations/ORG_UUID"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+            org_uuid = ""
+
+            response = requests.get(
+              f"https://localhost:8080/api/v1/organizations/{org_uuid}",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+
+            org = response.json()
+    delete:
+      tags:
+        - Organization
+      operationId: servertck.delete_org
+      summary: Delete an organization, the user must be its owner
+      parameters:
+        - $ref:  '#/components/parameters/OrganizationId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Organization not found
+        '204':
+          description: The organization is now deleted
+      x-code-samples:
+        - lang: 'cURL'
+          source: |
+            curl -XDELETE -H "Authorization: Bearer TOKEN" \
+              -H "Accept: application/json" \
+              "https://localhost:8080/api/v1/organizations/ORG_UUID"
+        - lang: 'Python'
+          source: |
+            import requests
+            
+            bearer_token = "..."
+            org_uuid = ""
+
+            response = requests.delete(
+              f"https://localhost:8080/api/v1/organizations/{org_uuid}",
+              headers={
+                "Authorization": f"Bearer {bearer_token}",
+                "Accept": "application/json"
+              }
+            )
+  /organizations/{org_id}/workspaces:
+    get:
+      tags:
+        - Organization
+      operationId: servertck.get_org_workspaces
+      summary: Get all the workspaces of the given organization
+      parameters:
+        - $ref:  '#/components/parameters/OrganizationId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Organization not found
+        '200':
+          description: The organization's workspaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspaces'
+  /organizations/{org_id}/workspaces/{workspace_id}:
+    put:
+      tags:
+        - Organization
+      operationId: servertck.link_workspace_to_org
+      summary: Link a workspace to the given organization
+      parameters:
+        - $ref: '#/components/parameters/OrganizationId'
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Organization or workspace not found
+        '200':
+          description: The organization's workspaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspaces'
+    delete:
+      tags:
+        - Organization
+      operationId: servertck.unlink_workspace_from_org
+      summary: Unlink a workspace from the given organization
+      parameters:
+        - $ref: '#/components/parameters/OrganizationId'
+        - $ref: '#/components/parameters/WorkspaceId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Organization or workspace not found
+        '204':
+          description: The workspace does not belong to this organization anymore
+
+  /workspaces:
+    get:
+      tags:
+        - Workspace
+      operationId: servertck.list_workspaces
+      summary: List all workspaces the authenticated user has access to
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: A list of workspaces
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspaces'
+    post:
+      tags:
+        - Workspace
+      operationId: servertck.create_workspace
+      summary: Create a workspace
+      responses:
+        '401':
+          description: Unauthenticated
+        '422':
+          description: Error in the payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Name already used in this organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '201':
+          description: The newly created workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+      requestBody:
+        description: Workspace definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewWorkspace'
+  /workspaces/{workspace_id}:
+    get:
+      tags:
+        - Workspace
+      operationId: servertck.get_workspace
+      summary: Get a workspace's details
+      parameters:
+        - $ref:  '#/components/parameters/WorkspaceId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Workspace not found
+        '200':
+          description: The workspace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+    delete:
+      tags:
+        - Workspace
+      operationId: servertck.delete_workspace
+      summary: Delete a workspace, the user must be its owner
+      parameters:
+        - $ref:  '#/components/parameters/WorkspaceId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Workspace not found
+        '204':
+          description: The workspace is now deleted
+  /workspaces/{workspace_id}/experiments:
+    get:
+      tags:
+        - Workspace
+      operationId: servertck.get_workspace_experiments
+      summary: Get a workspace's experiments
+      parameters:
+        - $ref:  '#/components/parameters/WorkspaceId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Workspace not found
+        '200':
+          description: The experiments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiments'
+
+  /experiments:
+    post:
+      tags:
+        - Experiment
+      operationId: servertck.upload_experiment
+      summary: Create an experiment
+      responses:
+        '401':
+          description: Unauthenticated
+        '422':
+          description: Error in the payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '201':
+          description: The newly created experiment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+      requestBody:
+        description: Experiment definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewExperiment'
+  /experiments/{experiment_id}:
+    get:
+      tags:
+        - Experiment
+      operationId: servertck.get_experiment
+      summary: Get an experiment's details
+      parameters:
+        - $ref:  '#/components/parameters/ExperimentId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Experiment not found
+        '200':
+          description: The experiment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Experiment'
+    delete:
+      tags:
+        - Experiment
+      operationId: servertck.delete_experiment
+      summary: Delete an experiment, the user must be its owner
+      parameters:
+        - $ref:  '#/components/parameters/ExperimentId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Experiment not found
+        '204':
+          description: The experiment is now deleted
+  /experiments/{experiment_id}/executions:
+    get:
+      tags:
+        - Experiment
+      operationId: servertck.get_experiment_executions
+      summary: Get the experiment's executions
+      parameters:
+        - $ref:  '#/components/parameters/ExperimentId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Experiment not found
+        '200':
+          description: The executions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Executions'
+  /experiments/{experiment_id}/schedulings:
+    get:
+      tags:
+        - Experiment
+      operationId: servertck.get_experiment_schedulings
+      summary: Get all the experiment's schedulings
+      parameters:
+        - $ref:  '#/components/parameters/ExperimentId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Experiment not found
+        '200':
+          description: The experiment schedulings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedulings'
+  /experiments/{experiment_id}/policy:
+    get:
+      tags:
+        - Experiment
+      operationId: servertck.get_experiment_policy
+      summary: Get the experiment's policy
+      parameters:
+        - $ref:  '#/components/parameters/ExperimentId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Experiment not found
+        '200':
+          description: The experiment policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+    post:
+      tags:
+        - Experiment
+      operationId: servertck.set_experiment_policy
+      summary: Set a policy onto an experiment
+      parameters:
+        - $ref:  '#/components/parameters/ExperimentId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Experiment not found
+        '200':
+          description: The experiment policy is set
+      requestBody:
+        description: Policy
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Policy'
+  /executions:
+    post:
+      tags:
+        - Execution
+      operationId: servertck.upload_execution
+      summary: Upload an execution
+      responses:
+        '401':
+          description: Unauthenticated
+        '422':
+          description: Error in the payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '201':
+          description: The newly created execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+      requestBody:
+        description: Execution definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewExecution'
+  /executions/{execution_id}:
+    get:
+      tags:
+        - Execution
+      operationId: servertck.get_execution
+      summary: Get an execution's details
+      parameters:
+        - $ref:  '#/components/parameters/ExecutionId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Execution not found
+        '200':
+          description: The execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+    delete:
+      tags:
+        - Execution
+      operationId: servertck.delete_execution
+      summary: Delete an execution, the user must be its owner
+      parameters:
+        - $ref:  '#/components/parameters/ExecutionId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Execution not found
+        '204':
+          description: The execution is now deleted
+  /executions/{execution_id}/journal:
+    get:
+      tags:
+        - Execution
+      operationId: servertck.get_execution_journal
+      summary: Get an execution's journal
+      parameters:
+        - $ref:  '#/components/parameters/ExecutionId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Execution not found
+        '200':
+          description: The execution's journal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Journal'
+  /executions/{execution_id}/report:
+    get:
+      tags:
+        - Execution
+      operationId: servertck.get_execution_report
+      summary: Get an execution's report (as PDF, HTML...)
+      parameters:
+        - $ref:  '#/components/parameters/ExecutionId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '404':
+          description: Execution not found
+        '200':
+          description: The execution's report
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/html:
+              schema:
+                type: string
+  /scheduling:
+    get:
+      tags:
+        - Scheduling
+      operationId: servertck.get_schedulings
+      summary: Get schedulings the authenticated user owns
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The schedulings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scheduling'
+    post:
+      tags:
+        - Scheduling
+      operationId: servertck.create_scheduling
+      summary: Create a scheduling
+      responses:
+        '401':
+          description: Unauthenticated
+        '201':
+          description: The newly created scheduling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scheduling'
+      requestBody:
+        description: Scheduling definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewScheduling'
+  /scheduling/{scheduling_id}:
+    get:
+      tags:
+        - Scheduling
+      operationId: servertck.get_scheduling
+      summary: Get schedulings the authenticated user owns
+      parameters:
+        - $ref:  '#/components/parameters/SchedulingId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The scheduling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Scheduling'
+    delete:
+      tags:
+        - Scheduling
+      operationId: servertck.delete_scheduling
+      summary: Delete a scheduling the authenticated user owns
+      parameters:
+        - $ref:  '#/components/parameters/SchedulingId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '204':
+          description: The scheduling is deleted
+  /scheduling/{scheduling_id}/status:
+    get:
+      tags:
+        - Scheduling
+      operationId: servertck.get_scheduling_status
+      summary: Get the status of the scheduling
+      parameters:
+        - $ref:  '#/components/parameters/SchedulingId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The scheduling's status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulingStatus'
+    post:
+      tags:
+        - Scheduling
+      operationId: servertck.set_scheduling_status
+      summary: Set the status of the scheduling
+      parameters:
+        - $ref:  '#/components/parameters/SchedulingId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The scheduling status is set
+      requestBody:
+        description: Scheduling status definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewSchedulingStatus'
+  /scheduling/{scheduling_id}/status/history:
+    get:
+      tags:
+        - Scheduling
+      operationId: servertck.get_scheduling_status_history
+      summary: Get the status history of the scheduling ordered by date
+      parameters:
+        - $ref:  '#/components/parameters/SchedulingId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The scheduling's status history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulingStatusHistory'
+  /scheduling/{scheduling_id}/executions:
+    get:
+      tags:
+        - Scheduling
+      operationId: servertck.get_scheduling_executions
+      summary: Get the executions, past and planned, for this scheduling
+      parameters:
+        - $ref:  '#/components/parameters/SchedulingId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The scheduling's executions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulingExecutions'
+  /policies:
+    get:
+      tags:
+        - Policy
+      operationId: servertck.get_policies
+      summary: Get all policies
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The policies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policies'
+    post:
+      tags:
+        - Policy
+      operationId: servertck.create_policy
+      summary: Create a policy
+      responses:
+        '401':
+          description: Unauthenticated
+        '201':
+          description: The newly created Pplicy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+      requestBody:
+        description: Policy definition
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPolicy'
+  /policies/{policy_id}:
+    get:
+      tags:
+        - Policy
+      operationId: servertck.get_policy
+      summary: Get a scheduling policy
+      parameters:
+        - $ref:  '#/components/parameters/PolicyId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '200':
+          description: The policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+    delete:
+      tags:
+        - Policy
+      operationId: servertck.delete_policy
+      summary: Delete a policy
+      parameters:
+        - $ref:  '#/components/parameters/PolicyId'
+      responses:
+        '401':
+          description: Unauthenticated
+        '204':
+          description: The policy is deleted
+
+components:
+  securitySchemes:
+    jwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TokenId:
+      name: token_id
+      description: Access token identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+    OrganizationId:
+      name: org_id
+      description: Organization identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+    WorkspaceId:
+      name: workspace_id
+      description: Workspace identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+    ExperimentId:
+      name: experiment_id
+      description: Experiment identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+    ExecutionId:
+      name: execution_id
+      description: Execution identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+    SchedulingId:
+      name: scheduling_id
+      description: Scheduling identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+    PolicyId:
+      name: policy_id
+      description: Policy identifier
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+        description: A UUID (v4)
+
+  schemas:
+    Error:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+    NewAccessToken:
+      type: object
+      required:
+        - name
+        - user_id
+      properties:
+        name:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+    AccessTokens:
+      type: array
+      items:
+        $ref: '#/components/schemas/AccessToken'
+    AccessToken:
+      type: object
+      required:
+        - id
+        - user_id
+        - name
+        - access_token
+        - refresh_token
+        - url
+        - links
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    Visibility:
+      type: object
+      required:
+        - execution
+        - experiment
+      properties:
+        execution:
+          type: object
+          required:
+            - anonymous
+            - members
+            - owner
+          properties:
+            anonymous:
+              type: string
+              enum:
+                - none
+                - status
+                - full
+            members:
+              type: string
+              enum:
+                - none
+                - status
+                - full
+            owner:
+              type: string
+              enum:
+                - none
+                - status
+                - full
+        experiment:
+          type: object
+          required:
+            - anonymous
+            - members
+            - owner
+          properties:
+            anonymous:
+              type: string
+              enum:
+                - private
+                - protected
+                - public
+            members:
+              type: string
+              enum:
+                - private
+                - protected
+                - public
+            owner:
+              type: string
+              enum:
+                - private
+                - protected
+                - public
+    NewOrganization:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    Organizations:
+      type: array
+      items:
+        $ref: '#/components/schemas/Organization'
+    Organization:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - owner
+        - workspaces
+        - url
+        - links
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner:
+          type: boolean
+          default: false
+          description: true when the authenticated user making the request is the owner of the resource
+        type:
+          type: string
+          default: collaborative
+          enum:
+            - personal
+            - collaborative
+        workspaces:
+          $ref: '#/components/schemas/Workspaces'
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    Workspaces:
+      type: array
+      items:
+        $ref: '#/components/schemas/Workspace'
+    NewWorkspace:
+      type: object
+      required:
+        - name
+        - org_id
+      properties:
+        name:
+          type: string
+          default: collaborative
+          enum:
+            - personal
+            - collaborative
+        org_id:
+          type: string
+          format: uuid
+        visibility:
+          $ref: '#/components/schemas/Visibility'
+    Workspace:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - owner
+        - url
+        - links
+      properties:
+        id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner:
+          type: boolean
+          default: false
+          description: true when the authenticated user making the request is the owner of the resource
+        type:
+          type: string
+          default: public
+          enum:
+            - personal
+            - protected
+            - public
+        visibility:
+          $ref: '#/components/schemas/Visibility'
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    Experiments:
+      type: array
+      items:
+        $ref: '#/components/schemas/Experiment'
+    Experiment:
+      type: object
+      required:
+        - id
+        - user_id
+        - org_id
+        - workspace_id
+        - created_date
+        - updated_date
+        - payload
+        - url
+        - links
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        policy_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        created_date:
+          type: string
+          format: date-time
+        updated_date:
+          type: string
+          format: date-time
+        payload:
+          type: object
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    NewExperiment:
+      type: object
+      required:
+        - org_id
+        - workspace_id
+        - payload
+      properties:
+        org_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        policy_id:
+          type: string
+          format: uuid
+        payload:
+          type: object
+    NewExecution:
+      type: object
+      required:
+        - experiment_id
+        - journal
+      properties:
+        experiment_id:
+          type: string
+          format: uuid
+        journal:
+          type: object
+    Executions:
+      type: array
+      items:
+        $ref: '#/components/schemas/Execution'
+    Execution:
+      type: object
+      required:
+        - id
+        - user_id
+        - org_id
+        - workspace_id
+        - experiment_id
+        - scheduling_id
+        - status
+        - payload
+        - url
+        - links
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        experiment_id:
+          type: string
+          format: uuid
+        scheduling_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        payload:
+          $ref: '#/components/schemas/Journal'
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    Journal:
+      type: object
+    Schedulings:
+      type: array
+      description: A list of schedulings
+      items:
+        $ref: '#/components/schemas/Scheduling'
+    Scheduling:
+      type: object
+      required:
+        - id
+        - user_id
+        - org_id
+        - workspace_id
+        - experiment_id
+        - token_id
+        - scheduled
+        - policy_id
+        - url
+        - links
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        org_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        experiment_id:
+          type: string
+          format: uuid
+        token_id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+          format: uuid
+        policy_id:
+          type: string
+          format: uuid
+        scheduled:
+          $ref: '#/components/schemas/ScheduleDateTime'
+        interval:
+          $ref: '#/components/schemas/ScheduleInterval'
+        repeat:
+          $ref: '#/components/schemas/ScheduleRepeat'
+        cron:
+          $ref: '#/components/schemas/ScheduleCron'
+        settings:
+          $ref: '#/components/schemas/Settings'
+        configuration:
+          $ref: '#/components/schemas/Configuration'
+        secrets:
+          $ref: '#/components/schemas/Secrets'
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    NewScheduling:
+      type: object
+      required:
+        - org_id
+        - workspace_id
+        - experiment_id
+        - token_id
+        - policy_id
+        - scheduled
+      properties:
+        org_id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        experiment_id:
+          type: string
+          format: uuid
+        token_id:
+          type: string
+          format: uuid
+        job_id:
+          type: string
+          format: uuid
+        policy_id:
+          type: string
+          format: uuid
+        scheduled:
+          $ref: '#/components/schemas/ScheduleDateTime'
+        interval:
+          $ref: '#/components/schemas/ScheduleInterval'
+        repeat:
+          $ref: '#/components/schemas/ScheduleRepeat'
+        cron:
+          $ref: '#/components/schemas/ScheduleCron'
+        settings:
+          $ref: '#/components/schemas/Settings'
+        configuration:
+          $ref: '#/components/schemas/Configuration'
+        secrets:
+          $ref: '#/components/schemas/Secrets'
+        url:
+          type: string
+          description: absolute path to the resource without base url
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              description: absolute path to the resource with base url
+    Settings:
+      type: object
+      description: Settings the the Chaos Platform runner will use to execute the experiment
+      externalDocs:
+        url: https://docs.chaostoolkit.org/reference/usage/cli/#create-the-settings-file
+    Configuration:
+      type: object
+      description: Configuration that override the one embedded into the experiment
+      externalDocs:
+        url: https://docs.chaostoolkit.org/reference/api/experiment/#configuration
+    Secrets:
+      type: object
+      description: |
+        Secrets that override the one embedded into the experiment. The API makes
+        no promises that secrets will be safely stored if hard-coded in that payload.
+        It is best to rely on the Chaos Toolkit capability to rely on external
+        keystore to fetch secrets at runtime.
+      externalDocs:
+        url: https://docs.chaostoolkit.org/reference/api/experiment/#secrets
+    SchedulingStatusHistory:
+      type: array
+      description: A list of statuses ordered by their date
+      items:
+        $ref: '#/components/schemas/SchedulingStatus'
+    SchedulingStatus:
+      type: object
+      required:
+        - user_id
+        - date
+        - username
+        - status
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        date:
+          type: string
+          format: date-time
+        status:
+          type: string
+          description: |
+            The status of the scheduling.
+            * created: the scheduling has been created but its first execution has not started yet
+            * pending: the scheduling has not yet started one of its next executions
+            * paused: the scheduling will not be executing until it is resumed
+            * running: the scheduling has an execution ongoing right now
+            * cancelled: the scheduling was explicitely cancelled and will not executed anymore
+            * completed: the scheduling has completed all of its executions
+            * failed: the scheduling failed internally for some reason, its next execution will be tried
+          enum:
+            - created
+            - pending
+            - paused
+            - running
+            - cancelled
+            - completed
+            - failed
+          default: created
+    NewSchedulingStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - pause
+            - resume
+            - cancel
+            - terminate
+    ScheduleDateTime:
+      type: string
+      description: A datetime when to execute the first execution. This can be a RFC3339 (UTC) format or a fluent declaration such "in 5 minutes"
+    ScheduleCron:
+      type: string
+      description: Tell the scheduler this will be run periodically using a CRON declaration. If set, no need to set the repeat value.
+    ScheduleRepeat:
+      type: integer
+      format: int64
+      description: How many times this schedule should be repeated for?
+    ScheduleInterval:
+      type: integer
+      format: int64
+      description: How often to run this schedule for?
+    SchedulingPolicy:
+      type: object
+      description: Policy to use for this scheduling
+    NewPolicy:
+      type: object
+    Policies:
+      type: array
+      items:
+        $ref: '#/components/schemas/Policy'
+    Policy:
+      type: object
+      description: |
+        A policy describes conditions, scoping and context for a resource such
+        as the experiment or scheduling. For the former, it is used to express
+        the blast radius of the experiment, e.g. the functional perimeter of the
+        experiment. For the scheduling, the policy describes how a scheduling
+        can co-exist with other schedulings, for instance, preventing
+        other schedulings to take place at a given moment.
+      properties:
+        type:
+          type: string
+          description: The kind of policy
+          enum:
+            - experiment
+            - scheduling
+    SchedulingExecutions:
+      type: array
+      description: A list of executions for a scheduling
+      items:
+        $ref: '#/components/schemas/SchedulingExecution'
+    SchedulingExecution:
+      type: object
+      required:
+        - schedule_id
+        - date
+        - state
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          description: When state is `done`, this is the identifier of the execution
+        schedule_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            - done
+            - planned
+        date:
+          type: string
+          format: date-time
