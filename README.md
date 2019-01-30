@@ -5,7 +5,7 @@ This repository contains the [OpenAPI 3 specification][openapi] of the
 
 [openapi]: https://www.openapis.org/
 [chaostoolkit]: https://chaostoolkit.org/
-[openapi]: https://openchaos.io/
+[openchaos]: https://openchaos.io/
 
 ## Overview
 
@@ -13,9 +13,9 @@ This OpenAPI specification describes resources using a REST-style design
 approach. The following resources are currently covered:
 
 * experiment: Chaos Engineering Experiments as per the
-  [Open Chaos Initiative][openapi]
+  [Open Chaos Initiative][openchaos]
 * execution: Chaos Engineering Experiment executions to support the Findings of
-  Chaos Engineering workflow as per the [Open Chaos Initiative][openapi]
+  Chaos Engineering workflow as per the [Open Chaos Initiative][openchaos]
 * organization/workspace: A two-level hierarchy to organize and manage the
   visibility of your Chaos Engineering effort. The semantic behind organization
   and workspaces is non-prescriptive (e.g., they can mean team and projects for
